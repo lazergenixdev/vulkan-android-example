@@ -287,9 +287,54 @@ VkRenderPass create_render_pass() {
     return render_pass;
 }
 
+/*
+#version 450 core
+
+layout(location = 0) out vec3 f_color;
+
+layout(push_constant) uniform Push {
+    float time;
+};
+
+vec2 positions[3] = vec2[](
+    vec2(0.0, -0.5),
+    vec2(0.5, 0.5),
+    vec2(-0.5, 0.5)
+);
+
+vec3 colors[3] = vec3[](
+    vec3(1.0, 0.0, 0.0),
+    vec3(0.0, 1.0, 0.0),
+    vec3(0.0, 0.0, 1.0)
+);
+
+mat2 rotate(float theta) {
+    float cost = cos(theta);
+    float sint = sin(theta);
+    return mat2(
+        cost, sint,
+       -sint, cost
+    );
+}
+
+void main() {
+    gl_Position = vec4(positions[gl_VertexIndex] * rotate(time), 0.0, 1.0);
+    f_color = colors[gl_VertexIndex];
+}
+*/
 struct vert_shader {
     #include "shader.vert.inl"
 };
+/*
+#version 450 core
+
+layout(location = 0) in  vec3 color;
+layout(location = 0) out vec4 fragColor;
+
+void main() {
+    fragColor = vec4(color, 1.0);
+}
+*/
 struct frag_shader {
     #include "shader.frag.inl"
 };
