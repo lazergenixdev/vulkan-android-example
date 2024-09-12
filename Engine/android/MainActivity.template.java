@@ -1,4 +1,4 @@
-package com.company.app;
+package $namespace;
 
 import android.app.Activity;
 import android.content.DialogInterface;
@@ -8,9 +8,14 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.widget.ListView;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
-public class App extends Activity {
+import android.view.View;
+
+public class MainActivity extends AppCompatActivity {
 
 	private SurfaceView surfaceView;
 
@@ -18,8 +23,10 @@ public class App extends Activity {
 	public native int destroy();
 	public static native void createGraphics(Surface surface);
 	public static native void resizeGraphics(Surface surface, int format, int width, int height);
+	public static native void destroyGraphics();
+
 	public void showDialog(String title, String message) {
-		final App activity = this;
+		final MainActivity activity = this;
 		runOnUiThread(new Runnable() {
 			@Override
 			public void run() {
@@ -29,13 +36,13 @@ public class App extends Activity {
 					.setPositiveButton("Ok", new DialogInterface.OnClickListener() {
 						@Override
 						public void onClick(DialogInterface dialogInterface, int i) {
-							LOGI("onClick", String.format("Got %d", i));
+							LOGI(String.format("onClick Got %d", i));
 						}
 					})
 					.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
 						@Override
 						public void onClick(DialogInterface dialogInterface, int i) {
-							LOGI("onClick", String.format("Got %d", i));
+							LOGI(String.format("onClick Got %d", i));
 						}
 					})
 					.show();
@@ -43,14 +50,28 @@ public class App extends Activity {
 		});
 	}
 
-	public static native void destroyGraphics();
-
 	static {
 		try {
-			System.loadLibrary("App");
+			System.loadLibrary("$name");
 		}
 		catch (Exception e) {
-			LOGE("Initialize", e.getMessage());
+			LOGE("Error: " + e.getMessage());
+		}
+	}
+
+	private void hideSystemUI() {
+		WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+		WindowInsetsControllerCompat insetsController = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+		insetsController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+		insetsController.hide(WindowInsetsCompat.Type.statusBars());
+		insetsController.hide(WindowInsetsCompat.Type.navigationBars());
+	}
+
+	@Override
+	public void onWindowFocusChanged(boolean hasFocus) {
+		super.onWindowFocusChanged(hasFocus);
+		if (hasFocus) {
+			hideSystemUI();
 		}
 	}
 
@@ -63,6 +84,8 @@ public class App extends Activity {
 		surfaceView = new SurfaceView(this);
 
 		setContentView(surfaceView);
+
+		hideSystemUI();
 
 		surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
 			@Override
@@ -81,19 +104,20 @@ public class App extends Activity {
 			}
 		});
 
-        LOGI("Hello world!", "I'm Java");
+        LOGI("[onCreate] Hello from Java!");
 	}
 
 	@Override
 	protected void onDestroy() {
+        LOGI("[onDestroy] BYE! from Java!");
 		destroy();
 		super.onDestroy();
 	}
 
-	private static void LOGI(String function_name, String message) {
-		Log.i(function_name, "[Java] " + message);
+	private static void LOGI(String message) {
+		Log.i("Engine", "[Java] " + message);
 	}
-	private static void LOGE(String function_name, String message) {
-		Log.i(function_name, "[Java] " + message);
+	private static void LOGE(String message) {
+		Log.e("Engine", "[Java] " + message);
 	}
 }

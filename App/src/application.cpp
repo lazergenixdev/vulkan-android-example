@@ -1,109 +1,14 @@
-#include <platform.hpp>
-#include <pthread.h>
-#include <unistd.h>
+#include <engine.hpp>
 #include <cstdio>
-#include <utility>
-#include <vector>
-#define VK_USE_PLATFORM_ANDROID_KHR 1
-#include <vulkan/vulkan.h>
-#include <android/native_window_jni.h>
-#include <semaphore.h>
-#include <jni.h>
-
-ANativeWindow* window {};
-
-#define JAVA_FUNCTIONS \
-X(SHOW_DIALOG, "showDialog", "(Ljava/lang/String;Ljava/lang/String;)V")
-
-struct Java {
-    struct Function {
-        char const* name;
-        char const* signature;
-        jmethodID   method_id;
-    };
-
-    JavaVM* vm {};
-    jclass  activity_class {};
-    jobject activity {};
-
-    enum {
-#define X(ID, NAME, SIG) ID,
-        JAVA_FUNCTIONS
-#undef X
-    };
-
-    Function functions [1] {
-#define X(ID, NAME, SIG) { NAME, SIG },
-        JAVA_FUNCTIONS
-#undef X
-    };
-} java;
-
-namespace os {
-    thread_local JNIEnv* env;
-    void show_dialog(char const* title, char const* message) {
-        jstring java_title   = env->NewStringUTF(title);
-        jstring java_message = env->NewStringUTF(message);
-        env->CallVoidMethod(java.activity, java.functions[Java::SHOW_DIALOG].method_id, java_title, java_message);
-        env->DeleteLocalRef(java_message);
-        env->DeleteLocalRef(java_title);
-    }
-}
-
-template <typename...T>
-void log(int level, char const* function_name, char const* format, T&&...args) {
-    char buffer[512];
-    snprintf(buffer, sizeof(buffer), format, std::forward<T>(args)...);
-    __android_log_write(level, function_name, buffer);
-}
-
-#define LOGIf(FMT, ...) log(ANDROID_LOG_INFO, __FUNCTION__, "[C++] " FMT, __VA_ARGS__)
-#define LOGI(MSG)  __android_log_write(ANDROID_LOG_INFO, __FUNCTION__, "[C++] " MSG)
-
-pthread_t main_thread_id {};
-sem_t graphics_semaphore {};
-
-bool volatile render = false;
-bool volatile want_exit = false;
-
-struct Graphics {
-    VkFormat   swap_format {};
-    VkExtent2D swap_extent {};
-
-    VkInstance                  instance         {};
-    VkSurfaceKHR                surface          {};
-    VkPhysicalDevice            physical_device  {};
-    VkDevice                    device           {};
-    VkQueue                     queue            {};
-    VkSwapchainKHR              swap_chain       {};
-    VkRenderPass                render_pass      {};
-    VkPipelineLayout            pipeline_layout  {};
-    VkPipeline                  pipeline         {};
-    VkCommandPool               command_pool     {};
-    VkCommandBuffer             command_buffer   {};
-    VkSemaphore                 write_semaphore  {};
-    VkSemaphore                 read_semaphore   {};
-    VkFence                     fence            {};
-
-    std::vector<VkImage>        swap_chain_images;
-    std::vector<VkImageView>    swap_chain_views;
-    std::vector<VkFramebuffer>  swap_chain_frame_buffers;
-
-    void destroy() {
-        if (device) vkDeviceWaitIdle(device);
-        for (auto view: swap_chain_views)
-            vkDestroyImageView(device, view, nullptr);
-        if (swap_chain) vkDestroySwapchainKHR(device, swap_chain, nullptr);
-        if (device) vkDestroyDevice(device, nullptr);
-        if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
-        if (instance) vkDestroyInstance(instance, nullptr);
-    }
-} gfx;
 
 int on_create() {
     LOGI("????");
     return 1;
 }
+
+// Most of this graphics stuff should not be here,
+//   but I am too lazy to refactor, so it shall
+//   stay here ._.
 
 void check_layers()
 {
@@ -142,7 +47,11 @@ VkInstance create_instance() {
 
     char const* extension_names [] {
         VK_KHR_SURFACE_EXTENSION_NAME,
+#if   OS_WINDOWS
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#elif OS_ANDROID
         VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
+#endif
     };
 
     VkInstanceCreateInfo instance_info {
@@ -163,12 +72,19 @@ VkInstance create_instance() {
 VkSurfaceKHR create_surface() {
     VkSurfaceKHR surface {};
 
+#if   OS_WINDOWS
+    VkWin32SurfaceCreateInfoKHR createInfo = {
+        .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+        .hwnd = engine.window,
+    };
+    VkResult result = vkCreateWin32SurfaceKHR(gfx.instance, &createInfo, nullptr, &surface);
+#elif OS_ANDROID
     VkAndroidSurfaceCreateInfoKHR createInfo = {
         .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
-        .window = window,
+        .window = engine.window,
     };
-
     VkResult result = vkCreateAndroidSurfaceKHR(gfx.instance, &createInfo, nullptr, &surface);
+#endif
 
     LOGIf("vkCreateAndroidSurfaceKHR(..) => %d [surface=%p]", result, surface);
 
@@ -201,7 +117,7 @@ VkDevice create_device() {
 
     int i = 0;
     for (auto const& queue_family: queue_families) {
-        LOGIf(" > Queue %d: count=%d flags=%X", i, queue_family.queueCount, queue_family.queueFlags);
+        LOGIf(" > Queue %d: count=%d flags=%X", i++, queue_family.queueCount, queue_family.queueFlags);
     }
 
     VkDevice device {};
@@ -244,6 +160,7 @@ VkSwapchainKHR create_swap_chain(uint32_t width, uint32_t height) {
     VkSurfaceCapabilitiesKHR capabilities {};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gfx.physical_device, gfx.surface, &capabilities);
 
+    LOGIf(" >     Current: width=%d height=%d", capabilities.currentExtent.width,  capabilities.currentExtent.height);
     LOGIf(" >       Width: min=%d max=%d", capabilities.minImageExtent.width,  capabilities.maxImageExtent.width);
     LOGIf(" >      Height: min=%d max=%d", capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
     LOGIf(" > Image count: min=%d max=%d", capabilities.minImageCount,  capabilities.maxImageCount);
@@ -258,7 +175,12 @@ VkSwapchainKHR create_swap_chain(uint32_t width, uint32_t height) {
     gfx.swap_format = formats[0].format;
     LOGIf(" >      Format: %d", gfx.swap_format);
 
-    gfx.swap_extent = {.width = width, .height = height};
+    if (width && height) {
+        gfx.swap_extent = {.width = width, .height = height};
+    }
+    else {
+        gfx.swap_extent = capabilities.currentExtent;
+    }
 
     VkSwapchainCreateInfoKHR swap_chain_info {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -563,10 +485,26 @@ void create_sync_primitives() {
     LOGIf("Create Fence + Semaphores => %d", result);
 }
 
+void update_swap_chain(uint32_t width, uint32_t height) {
+    LOGI("creating new swap chain!!");
+    os_lock_mutex(engine.render_lock);
+    vkDeviceWaitIdle(gfx.device);
+    for (auto view: gfx.swap_chain_views) {
+        vkDestroyImageView(gfx.device, view, nullptr);
+    }
+    for (auto frame_buffer: gfx.swap_chain_frame_buffers) {
+        vkDestroyFramebuffer(gfx.device, frame_buffer, nullptr);
+    }
+    vkDestroySwapchainKHR(gfx.device, gfx.swap_chain, nullptr);
+    gfx.swap_chain = create_swap_chain(width, height);
+    create_image_views();
+    create_frame_buffers();
+    os_unlock_mutex(engine.render_lock);
+}
+
 void draw_frame() {
     static float t = 0.0f;
 
-    usleep(16'000);
     vkWaitForFences(gfx.device, 1, &gfx.fence, VK_TRUE, UINT64_MAX);
     vkResetFences(gfx.device, 1, &gfx.fence);
 
@@ -655,97 +593,52 @@ void draw_frame() {
     t += 0.01f;
 }
 
-void* android_main_thread(void*)
+void main_loop()
 {
-    LOGI("Attaching...");
-    java.vm->AttachCurrentThread(&os::env, nullptr);
-
     char message[256];
-    snprintf(message, sizeof(message), "Called from [%s]! :)", __PRETTY_FUNCTION__);
+    snprintf(message, sizeof(message), "Called from %s!  :)", __PRETTY_FUNCTION__);
     os::show_dialog("C++ YAY!",
                     " VUID-vkDestroyDevice-device-05137(ERROR / SPEC): msgNum: 1215490720 - Validation Error: [ VUID-vkDestroyDevice-device-05137 ] Object 0: handle = 0x7db7375fc0, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x4872eaa0 | vkDestroyDevice():  OBJ ERROR : For VkDevice 0x7db7604340[], VkCommandBuffer 0x7db7375fc0[] has not been destroyed. The Vulkan spec states: All child objects created on device must have been destroyed prior to destroying device (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkDestroyDevice-device-05137)\n"
                     "                                                                                                        Objects: 1\n"
                     "                                                                                                            [0] 0x7db7375fc0, type: 6, name: NULL"
                     );
 
-    while (!render) sleep(1);
-
-    while (!want_exit) {
+    while (!engine.want_exit) {
+        os_lock_mutex(engine.render_lock);
         draw_frame();
+        os_unlock_mutex(engine.render_lock);
     }
-
-    LOGI("Detaching...");
-    java.vm->DetachCurrentThread();
-    return nullptr;
 }
 
-void create_graphics() {
-    gfx.instance = create_instance();
-    gfx.surface = create_surface();
-    gfx.physical_device = pick_physical_device();
-    gfx.device = create_device();
-    LOGI("Did a thing?");
-}
-
-extern "C"
-JNIEXPORT jint JNICALL Java_com_company_app_App_create(JNIEnv* env, jobject thiz)
-{
-    LOGI("Setting up Java for C++...");
-
-    env->GetJavaVM(&java.vm);
-    java.activity       = env->NewGlobalRef(thiz);
-    java.activity_class = env->GetObjectClass(thiz);
-    LOGIf("Got class: %p", java.activity_class);
-
-    for (auto&& fn: java.functions) {
-        fn.method_id = env->GetMethodID(java.activity_class, fn.name, fn.signature);
-        LOGIf("Got method id = %i", fn.method_id);
-    }
-
-    pthread_create(&main_thread_id, nullptr, android_main_thread, nullptr);
-    return 0;
-}
-
-extern "C"
-JNIEXPORT jint JNICALL Java_com_company_app_App_destroy(JNIEnv* env, jobject)
-{
-    LOGI("Destroying main thread...");
-    pthread_join(main_thread_id, nullptr);
-
-    env->DeleteGlobalRef(java.activity);
-    java.activity = nullptr;
-    return 0;
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_company_app_App_createGraphics(JNIEnv *env, jclass, jobject java_surface)
-{
-    window = ANativeWindow_fromSurface(env, java_surface);
-    create_graphics();
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_company_app_App_resizeGraphics(JNIEnv *env, jclass, jobject java_surface, jint format, jint width, jint height)
-{
-    LOGIf("Surface (%p) resized: [format=%d,width=%d,height=%d]", java_surface, format, width, height);
-    gfx.swap_chain = create_swap_chain((uint32_t)width, (uint32_t)height);
+void Graphics::create() {
+    instance = create_instance();
+    surface = create_surface();
+    physical_device = pick_physical_device();
+    device = create_device();
+    swap_chain = create_swap_chain(0, 0);
     create_image_views();
-    gfx.render_pass = create_render_pass();
-    gfx.pipeline = create_pipeline();
+    render_pass = create_render_pass();
+    pipeline = create_pipeline();
     create_frame_buffers();
-    gfx.command_pool = create_command_pool();
-    gfx.command_buffer = create_command_buffer();
+    command_pool = create_command_pool();
+    command_buffer = create_command_buffer();
     create_sync_primitives();
-    render = true;
+    LOGI("Graphics Created!!!");
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_company_app_App_destroyGraphics(JNIEnv *env, jclass)
-{
-    want_exit = true;
-    LOGI("Destroying Graphics...");
-    gfx.destroy();
+void Graphics::destroy() {
+    if (device) vkDeviceWaitIdle(device);
+    if (fence) vkDestroyFence(device, fence, nullptr);
+    if (read_semaphore) vkDestroySemaphore(device, read_semaphore, nullptr);
+    if (write_semaphore) vkDestroySemaphore(device, write_semaphore, nullptr);
+    if (command_pool) vkDestroyCommandPool(device, command_pool, nullptr);
+    if (render_pass) vkDestroyRenderPass(device, render_pass, nullptr);
+    if (pipeline_layout) vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+    if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
+    for (auto frame_buffer: swap_chain_frame_buffers) vkDestroyFramebuffer(device, frame_buffer, nullptr);
+    for (auto view: swap_chain_views) vkDestroyImageView(device, view, nullptr);
+    if (swap_chain) vkDestroySwapchainKHR(device, swap_chain, nullptr);
+    if (device) vkDestroyDevice(device, nullptr);
+    if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
+    if (instance) vkDestroyInstance(instance, nullptr);
 }

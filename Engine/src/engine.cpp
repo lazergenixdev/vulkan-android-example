@@ -1,25 +1,27 @@
 #include <engine.hpp>
 
-Engine engine{
-    69};
+Engine engine {};
+Graphics gfx {};
+
+extern void main_loop();
 
 auto Engine::create(os::Instance const &instance, int _) -> int
 {
-    LOG(__FUNCTION__);
+    os::initialize();
     return 0;
 }
 
 auto Engine::run() -> void
 {
-    LOG(__FUNCTION__);
-
+    LOGI("running!");
 #if OS_ANDROID
-    LOG("ANDROID IS WORKING!!!");
+    LOGI("ANDROID IS WORKING!!!");
 #endif
+    main_loop();
 }
 
 auto Engine::destroy() -> int
 {
-    LOG(__FUNCTION__);
+    os::shutdown();
     return 0;
 }
