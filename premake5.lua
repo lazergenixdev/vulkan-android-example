@@ -1,7 +1,5 @@
 require 'vendor/android_studio'
 
-defines { 'ENGINE_NAME="Engine"' }
-
 if _ACTION == 'clean' then
     os.rmdir 'build'
 end
@@ -36,6 +34,5 @@ filter 'configurations:Dist'
     optimize 'On'
 filter {}
 
-include 'Engine'
-
+include 'Engine' -- must include Engine first
 include 'App'

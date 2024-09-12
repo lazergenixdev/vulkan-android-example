@@ -1,5 +1,6 @@
 include 'scripts/premake-android.lua'
 
+defines { 'ENGINE_NAME="Engine"' }
 defines { ('__TITLE__=\"%s\"'):format(settings.title) }
 
 project 'Engine'
